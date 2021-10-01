@@ -1,0 +1,1456 @@
+---
+title: "Maternal mortality associated with COVID-19 in Brazil in 2020 and 2021: comparison with non-pregnant women and men"
+author: 'Codes and outputs'
+date: "09/06/2021"
+output:   
+  pdf_document:
+    keep_tex: yes
+  word_document: default
+  html_document:
+    df_print: paged
+    self_contained: no
+---
+
+# Description
+ 
+This file presents the documentation of the analysis of article "Maternal mortality associated with COVID-19 in Brazil in 2020 and 2021: comparison with non-pregnant women and men".
+
+# R packages used, functions and dataset import
+
+
+The data are analyzed using the free-software R (https://www.R-project.org) in version 4.0.3. Next, we present and load the libraries used in the data analysis process.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r pacotes, echo=TRUE, message=FALSE, warning =FALSE,error=FALSE, results='hide'}
+#load packages
+loadlibrary <- function(x) {
+  if (!require(x, character.only = TRUE)) {
+    install.packages(x, dependencies = T)
+    if (!require(x, character.only = TRUE))
+      stop("Package not found")
+  }
+}
+
+packages <-
+  c(
+    "readr",
+    "readxl",
+    "janitor",
+    "dplyr",
+    "forcats",
+    "stringr",
+    "lubridate",
+    "summarytools",
+    "magrittr",
+    "questionr", 
+    "knitr",
+    "epitools", 
+    "modelsummary", 
+    "kableExtra", 
+    "DescTools", 
+    "ggplot2"
+    )
+lapply(packages, loadlibrary)
+```
+
+One can see below the functions that will be used in the data analysis.
+```{r,echo=TRUE, eval=TRUE, message=FALSE,warning =FALSE,error=FALSE,results='hide'}
+#functions for summary measures
+media <- function(x)
+  mean(x, na.rm = TRUE)
+mediana <- function(x)
+  median(x, na.rm = TRUE)
+DP <- function(x)
+  sd(x, na.rm = TRUE)
+minimo <- function(x)
+  base::min(x, na.rm = TRUE)
+maximo <- function(x)
+  base::max(x, na.rm = TRUE)
+q25 <- function(x)
+  stats::quantile(x, p = 0.25, na.rm = TRUE)
+q75 <- function(x)
+  stats::quantile(x, p = 0.75, na.rm = TRUE)
+IQR <- function(x)
+  round(q75(x) - q25(x), 2)
+n <- function(x)
+  sum(!is.na(x))
+```
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+#Breslow-Day test function
+teste_breslowday <- function(dados, var) {
+  tab <- array(0, dim = c(2,2,3))
+  dat1 <- subset(dados, group == "men")
+  tab[,,1] <- table(dat1$period, dat1[[var]])
+  dat2 <- subset(dados, group == "women")
+  tab[,,2] <- table(dat2$period, dat2[[var]])
+  dat3 <- subset(dados, group == "maternal")
+  tab[,,3] <- table(dat3$period, dat3[[var]])
+  a <- BreslowDayTest(tab[,,c(1,2)], correct = TRUE)
+  b <- BreslowDayTest(tab[,,c(1,3)], correct = TRUE)
+  c <- BreslowDayTest(tab[,,c(2,3)], correct = TRUE)
+  out <- data.frame(comp = c("Men-W", "Men-Mat", "W-Mat"), 
+                    stat = c(a$statistic, b$statistic, c$statistic), 
+                    p_valor = c(a$p.value, b$p.value, c$p.value))
+  return(out)
+}
+```
+
+```{r, echo=FALSE, eval=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+#function for forest plot
+or_forest <- function(dados, var){
+  dados_a <- subset(dados, group == "men")
+  a <- with(dados_a, odds.ratio(year_case, dados_a[[var]]))
+  masc_or <- round(c(a$OR, a$`2.5 %`, a$`97.5 %`), 2)
+ 
+  dados_b <- subset(dados, group == "women")
+  b <- with(dados_b, odds.ratio(year_case, dados_b[[var]]))
+  fem_or <- round(c(b$OR, b$`2.5 %`, b$`97.5 %`), 2) 
+  
+  dados_c <- subset(dados, group == "maternal")
+  c <- with(dados_c, odds.ratio(year_case, dados_c[[var]]))
+  mat_or <- round(c(c$OR, c$`2.5 %`, c$`97.5 %`), 2)
+  
+  
+  out <- data.frame(group = c("men", "women", "maternal"),
+                    or = c(masc_or[1], fem_or[1],mat_or[1]), 
+                    li = c(masc_or[2], fem_or[2],mat_or[2]), 
+                    ls = c(masc_or[3], fem_or[3],mat_or[3]), 
+                    var = rep(var,3))
+  return(out)
+}
+```
+
+The Influenza Epidemiological
+Surveillance Information System, SIVEP-Gripe (Sistema de Informação de Vigilância Epidemiológica da Gripe), is a
+nationwide surveillance database used to monitor severe acute respiratory infections in Brazil. 
+
+Notification is mandatory for Influenza Syndrome (characterized by at least two of the following signs and symptoms: fever, even if referred, chills, sore throat, headache, cough, runny nose, olfactory or taste disorders) and who has dyspnea/respiratory discomfort or persistent pressure in the chest or O2 saturation less than 95\% in room air or bluish color of the lips or face. Asymptomatic individuals with laboratory confirmation by molecular biology or immunological examination for COVID-19 infection are also reported.
+
+For notifications in Sivep-Gripe, hospitalized cases in both public and private hospitals and all deaths due to severe acute respiratory infections regardless of hospitalization must be considered.
+
+The search was limited to the first notified case of COVID-19 in February 2020 until the 17th epidemiological week of 2021 (up to May 1, 2021). The datasets were obtained on May 6, 2021, on the site https://opendatasus.saude.gov.br/dataset. The first period (8th to 53rd epidemiological week of 2020) and the second period (1st to 17th epidemiological week of 2021) datasets can be obtained at https://drive.google.com/file/d/1jts4h0ovdwFh86SdKyslMLSG9rOy3UjX/view?usp=sharing and at https://drive.google.com/file/d/1gQSy_dcUkd1UrDEcsrDbyGl4gEvcI8z_/view?usp=sharing, respectively. The data are loaded below:
+
+```{r,echo=FALSE, eval=TRUE, message=FALSE,warning =FALSE,error=FALSE,results='hide'}
+ memory.limit(999999)
+```
+
+```{r,echo=TRUE,message=FALSE,warning =FALSE,error=FALSE,results='hide'}
+#loading the datasets
+#2021
+data_2021 <- read_delim(
+  "INFLUD21-03-05-2021.csv",
+  ";",
+  escape_double = FALSE,
+  locale = locale(encoding = "ISO-8859-2"),
+  trim_ws = TRUE
+)
+
+#2020
+data_2020 <- read_delim(
+  "INFLUD-03-05-2021.csv",
+  ";",
+  escape_double = FALSE,
+  locale = locale(encoding = "ISO-8859-2"),
+  trim_ws = TRUE
+)
+
+sem <- 17 #limit of epidemiological week of 2021
+
+#### Concatenating 2020 and 2021 data ##############
+data_all <- rbind(data_2020, data_2021)
+
+# Creating the case year variable
+data_all <-  data_all %>%
+  dplyr::mutate(
+    dt_sint = as.Date(DT_SIN_PRI, format = "%d/%m/%Y"),
+    year_case = lubridate::year(dt_sint)
+  )
+
+```
+
+There are `r dim(data_all)[1]` cases in the complete dataset.  The case selection is presented in the following according to the flowchart presented in the article. 
+
+# Case selection and data treatment
+
+The first filter consists of selecting of confirmed cases of SARS by SARS-COV-2. The variable indicating the classification is `CLASSI_FIN`, with the following categories: 1-SARS by influenza, 2-SARS by another respiratory virus, 3-SARS by another etiological agent, 4-SARS not specified, and 5-SARS by COVID-19.
+
+```{r, echo=TRUE, eval=TRUE, message=FALSE, warning =FALSE, error=FALSE}
+questionr::freq(
+  data_all$CLASSI_FIN,
+  cum = FALSE,
+  total = TRUE,
+  na.last = FALSE,
+  valid = FALSE
+) %>%
+  knitr::kable(caption = "Frequency table for case classification", digits = 2) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+#Selecting only COVID-19 confirmed cases
+data1 <- dplyr::filter(data_all, CLASSI_FIN == 5)
+```
+
+When considering only COVID-19 confirmed cases, we get `r dim(data1)[1]` observations.
+
+The second filtering consists of cases from 8th epidemiological week of 2020 to 17th epidemiological week of 2021. 
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#Cases from the 8th epidemiological week of 2020
+data2 <- data1 %>% 
+  filter((year_case == 2020 & SEM_PRI >= 8) | year_case == 2021)
+```
+
+There are `r dim(data2[data2$year_case==2021  & data2$SEM_PRI==53, ])[1]` cases in 2021 in epidemiological week 53 of 2020. These are cases from the first two days of 2021, which are still part of the last epidemiological week of 2020 (http://portalsinan.saude.gov.br/calendario-epidemiologico?layout=edit&id=168). However, these cases belong to the 53rd week of 2020 and we corrected as follows:
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data2 <- data2 %>% 
+  mutate(year_case = ifelse(year_case == 2021 & SEM_PRI ==53, 2020, year_case)) %>% 
+  filter(year_case == 2020 | (year_case == 2021 & SEM_PRI <= sem)) 
+
+# Creation of period variable
+data2 <- data2 %>% 
+  mutate(period = case_when(year_case == 2020 ~ "1st", 
+                            year_case == 2021 ~ "2st"), 
+         year_case = as.factor(year_case))
+```
+
+There are `r dim(data2)[1]` observations.
+
+The next step is to identify maternal population (pregnant or postpartum women). For that, we analyze the `CS_GESTANT` variable. This variable takes the values: 1-1st trimester; 2-2nd  trimester; 3-3rd  trimester; 4-gestational age ignored; 5-No; 6-Not applicable; 9-Ignored.
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#frequency table for CS_GESTANT
+questionr::freq(
+  data2$CS_GESTANT,
+  cum = FALSE,
+  total = TRUE,
+  na.last = FALSE,
+  valid = FALSE
+) %>%
+  kable(caption = "Frequency table for pregnancy information", digits = 2) 
+```
+
+
+The puerperium indicator variable is `PUERPERA`, with categories 1-yes, 2-no and 9-Ignored.
+
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#frequency table for PUERPERA
+questionr::freq(
+  data2$PUERPERA,
+  cum = FALSE,
+  total = TRUE,
+  na.last = FALSE,
+  valid = FALSE
+) %>%
+  kable(caption = "Frequency table for puerperium information", digits = 2)
+```
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+table(data2$CS_GESTANT, data2$PUERPERA)
+```
+
+There are `r dim(data2[data2$CS_GESTANT==0,])[1]` cases with CS_GESTANT = 0, which have no label in the dataset dictionary. 
+
+For the analysis of the maternal population (pregnant or puerperal from 10 to 55 years old), non-maternal women (any age) and men (any age) population, we will exclude the cases without information about pregnancy. The age variable is `NU_IDADE_N`. 
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#Creation of the maternal variable (yes and no)
+data2 <- data2 %>%
+  mutate(
+    materna = case_when(
+      CS_GESTANT >= 1 & CS_GESTANT <= 4 & NU_IDADE_N >= 10 & NU_IDADE_N <= 55  ~ "yes",
+      CS_GESTANT == 5 & PUERPERA == 1  & NU_IDADE_N >= 10 & NU_IDADE_N <= 55 ~ "yes",
+      CS_GESTANT == 9 & PUERPERA == 1 & NU_IDADE_N >=10 & NU_IDADE_N <= 55 ~ "yes",
+      (CS_GESTANT == 0 | CS_GESTANT == 9) & 
+        (PUERPERA == 2 | PUERPERA == 9 | is.na(PUERPERA)) ~ NA_character_, 
+      TRUE ~ "no"
+    )
+  )
+```
+
+Now, we will create the group variable with three categories: maternal, women (non-maternal women) and men. 
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#Criation of group variable
+data2 <- data2 %>%
+  mutate(
+    group = case_when(
+      materna == "yes" ~ "maternal", 
+      materna != "yes"  & CS_SEXO == "F" ~ "women", 
+       CS_SEXO == "M" ~ "men", 
+      TRUE ~ NA_character_
+    )
+  )
+
+#Filtering only valid categories of group
+data3 <- data2 %>% 
+  filter(!is.na(group))
+```
+
+There are `r dim(data3)[1]` observations.
+
+
+We are now going to select only the finalized cases (cure or death). The variable is `EVOLUCAO`, with 1 - cure, 2 - death by SARS, 3 - death by other cause. 
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data3 <- data3 %>% 
+  mutate(death = case_when(
+    EVOLUCAO == 1 ~ "cure", 
+    EVOLUCAO == 2 ~ "death", 
+    EVOLUCAO == 3 ~ "death", 
+    TRUE ~ NA_character_
+  ))
+
+data4 <- data3 %>% 
+  filter(!is.na(death))
+```
+
+There are `r dim(data4)[1]` observations.
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+## arrange the order of group levels
+data4$group <- factor(data4$group, 
+                               levels = c("men", "women", "maternal"))
+
+```
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#crosstable of group and period
+with(data4, table(group, period))
+```
+
+
+
+# Epidemiologic characteristics 
+
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+# Ethnicity
+data4 <-  data4 %>%
+  mutate(
+    ethnicity = case_when(
+      CS_RACA == 1 ~ "white",
+      CS_RACA == 2 ~ "black",
+      CS_RACA == 3 ~ "yellow",
+      CS_RACA == 4 ~ "brown",
+      CS_RACA == 5 ~ "indigenous",
+      TRUE ~ NA_character_
+    )
+  )
+
+# Education
+data4 <-  data4 %>%
+  mutate(
+    education = case_when(
+      CS_ESCOL_N == 0 ~ "no school",
+      CS_ESCOL_N == 1 ~ "fund1",
+      CS_ESCOL_N == 2 ~ "fund2",
+      CS_ESCOL_N == 3 ~ "high school",
+      CS_ESCOL_N == 4 ~ "college",
+      TRUE ~ NA_character_
+    )
+  )
+
+# Age
+
+data4 <- data4 %>%
+  mutate(age = case_when(TP_IDADE == 1 ~ NU_IDADE_N/365,
+                           TP_IDADE == 2 ~ NU_IDADE_N/12,
+                           TP_IDADE == 3 ~ NU_IDADE_N
+                           ))
+data4$age <- ifelse(data4$age < 0, NA, data4$age)
+data4$age <- ifelse(data4$age >= 117, NA, data4$age)
+
+# Age group
+data4 <-  data4 %>%
+  mutate(
+    age_group = case_when(
+      age <= 19 ~ "<20",
+      age >= 20
+      & age <= 34 ~ "20-34",
+      age >= 35 ~ ">=35",
+      TRUE ~ NA_character_
+    )
+  )
+data4$age_group <-
+  factor(data4$age_group, levels = c("<20", "20-34", ">=35"))
+ 
+```
+
+## Non-maternal women
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "women")
+```
+
+### Ethnicity
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(ethnicity, period,  prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+### Education
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(education, period, prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+### Age 
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+datasummary((period) ~ age*(n+media+DP+mediana+q25+q75+IQR),
+            data = data4_aux, output = 'markdown')
+```
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#teste t
+t.test(age ~ period, data = data4_aux)
+```
+
+### Age group
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(age_group, period, prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+## Men
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "men")
+```
+
+### Ethnicity
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(ethnicity, period,  prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+### Education
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(education, period, prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+### Age 
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+datasummary((period) ~ age*(n+media+DP+mediana+q25+q75+IQR),
+            data = data4_aux, output = 'markdown')
+```
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#teste t
+t.test(age ~ period, data = data4_aux)
+```
+
+### Age group
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(age_group, period, prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+
+## Maternal
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "maternal")
+```
+
+### Ethnicity
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(ethnicity, period,  prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+### Education
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(education, period, prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+### Age 
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+datasummary((period) ~ age*(n+media+DP+mediana+q25+q75+IQR),
+            data = data4_aux, output = 'markdown')
+```
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#teste t
+t.test(age ~ period, data = data4_aux)
+```
+
+### Age group
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+with(data4_aux, ctable(age_group, period, prop = "c", useNA = "no", chisq = TRUE, OR = TRUE))
+```
+
+# Comorbities
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+#Cardiac
+data4 <-  data4 %>%
+  mutate(cardiac = case_when(CARDIOPATI == 1 ~ "yes",
+                                CARDIOPATI == 2 ~ "no",
+                                TRUE ~ NA_character_))
+
+#Hematologic
+data4 <-  data4 %>%
+  mutate(hematologic = case_when(HEMATOLOGI == 1 ~ "yes",
+                                HEMATOLOGI == 2 ~ "no",
+                                TRUE ~ NA_character_))
+
+#Hepatic
+data4 <-  data4 %>%
+  mutate(hepatic = case_when(HEPATICA == 1 ~ "yes",
+                              HEPATICA == 2 ~ "no",
+                              TRUE ~ NA_character_))
+
+#Asthma
+data4 <-  data4 %>%
+  mutate(asthma = case_when(ASMA == 1 ~ "yes",
+                          ASMA == 2 ~ "no",
+                          TRUE ~ NA_character_))
+
+#Diabetes
+data4 <-  data4 %>%
+  mutate(diabetes = case_when(DIABETES == 1 ~ "yes",
+                              DIABETES == 2 ~ "no",
+                              TRUE ~ NA_character_))
+
+#Neurologic
+data4 <-  data4 %>%
+  mutate(neurologic = case_when(NEUROLOGIC == 1 ~ "yes",
+                                NEUROLOGIC == 2 ~ "no",
+                                TRUE ~ NA_character_))
+
+#Pneumologic
+data4 <-  data4 %>%
+  mutate(pneumologic = case_when(PNEUMOPATI == 1 ~ "yes",
+                                PNEUMOPATI == 2 ~ "no",
+                                TRUE ~ NA_character_))
+
+#Imunossupression
+data4 <-  data4 %>%
+  mutate(imuno = case_when(IMUNODEPRE == 1 ~ "yes",
+                                IMUNODEPRE == 2 ~ "no",
+                                TRUE ~ NA_character_))
+
+#Renal
+data4 <-  data4 %>%
+  mutate(renal = case_when(RENAL == 1 ~ "yes",
+                           RENAL == 2 ~ "no",
+                           TRUE ~ NA_character_))
+
+#Obesity
+data4 <-  data4 %>%
+  mutate(obesity = case_when(OBESIDADE == 1 ~ "yes",
+                               OBESIDADE == 2 ~ "no",
+                               TRUE ~ NA_character_))
+
+#Any comorbidity
+
+df <- data4 %>% 
+  select(cardiac,obesity,hematologic,hepatic,asthma,diabetes,neurologic,pneumologic,imuno,renal)
+
+#if all comorbities in df are NA (not available), return NA.
+soma <- function(x){
+  if (sum(is.na(x))==10)
+    return(NA_character_)
+  else
+   return(sum(!is.na(x) & x=="yes")) 
+}
+data4$qt_comorb_aux <- apply(df,1,soma)
+
+data4 <- data4 %>%
+  mutate(comorbidity = case_when(qt_comorb_aux >=1 ~ "yes",
+                                  qt_comorb_aux ==0 ~ "no",
+                               TRUE ~ NA_character_))
+```
+
+
+## Non-maternal women
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "women")
+```
+
+### Cardiac
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, cardiac, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+###  Hematologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, hematologic, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+###  Diabetes
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$diabetes, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Obesity
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$obesity, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Asthma
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$asthma, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Hepatic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$hepatic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Neurologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$neurologic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Pneumologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$pneumologic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Imunossupression
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$imuno, chisq=TRUE, prop="r", useNA = "no")
+```
+
+###  Renal
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$renal, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+### Any comorbidity
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, comorbidity, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+
+## Men
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "men")
+```
+
+### Cardiac
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, cardiac, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+###  Hematologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, hematologic, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+###  Diabetes
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$diabetes, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Obesity
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$obesity, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Asthma
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$asthma, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Hepatic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$hepatic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Neurologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$neurologic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Pneumologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$pneumologic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Imunossupression
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$imuno, chisq=TRUE, prop="r", useNA = "no")
+```
+
+###  Renal
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$renal, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+### Any comorbidity
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, comorbidity, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+## Maternal
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "maternal")
+```
+
+### Cardiac
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, cardiac, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+###  Hematologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, hematologic, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+###  Diabetes
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$diabetes, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Obesity
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$obesity, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Asthma
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$asthma, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Hepatic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$hepatic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Neurologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$neurologic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Pneumologic
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$pneumologic, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+###  Imunossupression
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$imuno, chisq=TRUE, prop="r", useNA = "no")
+```
+
+###  Renal
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+ctable(data4_aux$period, data4_aux$renal, chisq=TRUE, prop="r",  useNA = "no")
+```
+
+### Any comorbidity
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, comorbidity, prop = "r", useNA = "no", chisq = TRUE))
+```
+
+# Symptoms
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+# Fever
+data4 <-  data4 %>%
+  mutate(fever = case_when(FEBRE == 1 ~ "yes",
+                           FEBRE == 2 ~ "no",
+                           TRUE ~ NA_character_))
+
+# Cough
+data4 <-  data4 %>%
+  mutate(cough = case_when(TOSSE == 1 ~ "yes",
+                           TOSSE == 2 ~ "no",
+                           TRUE ~ NA_character_))
+
+# Sore throat
+data4 <-  data4 %>%
+  mutate(sore_throat = case_when(GARGANTA == 1 ~ "yes",
+                              GARGANTA == 2 ~ "no",
+                              TRUE ~ NA_character_))
+
+# Dyspnea
+data4 <-  data4 %>%
+  mutate(dyspnea = case_when(DISPNEIA == 1 ~ "yes",
+                              DISPNEIA == 2 ~ "no",
+                              TRUE ~ NA_character_))
+
+# Respiratory discomfort
+data4 <-  data4 %>%
+  mutate(resp_disc = case_when(DESC_RESP == 1 ~ "yes",
+                               DESC_RESP == 2 ~ "no",
+                               TRUE ~ NA_character_))
+
+# Desaturation
+data4 <-  data4 %>%
+  mutate(desaturation = case_when(SATURACAO == 1 ~ "yes",
+                               SATURACAO == 2 ~ "no",
+                               TRUE ~ NA_character_))
+
+# Diarrhea
+data4 <-  data4 %>%
+  mutate(diarrhea = case_when(DIARREIA == 1 ~ "yes",
+                              DIARREIA == 2 ~ "no",
+                              TRUE ~ NA_character_))
+
+# Vomit
+data4 <-  data4 %>%
+  mutate(vomit = case_when(VOMITO == 1 ~ "yes",
+                            VOMITO == 2 ~ "no",
+                            TRUE ~ NA_character_))
+
+# Abdominal pain
+data4 <-  data4 %>%
+  mutate(abd_pain = case_when(DOR_ABD == 1 ~ "yes",
+                             DOR_ABD == 2 ~ "no",
+                             TRUE ~ NA_character_))
+
+# Fatigue
+data4 <-  data4 %>%
+  mutate(fatigue = case_when(FADIGA == 1 ~ "yes",
+                            FADIGA == 2 ~ "no",
+                            TRUE ~ NA_character_))
+
+# Olfactory loss
+data4 <-  data4 %>%
+  mutate(olfac_loss = case_when(PERD_OLFT == 1 ~ "yes",
+                               PERD_OLFT == 2 ~ "no",
+                               TRUE ~ NA_character_))
+
+# Loss of taste
+data4 <-  data4 %>%
+  mutate(loss_taste = case_when(PERD_PALA == 1 ~ "yes",
+                               PERD_PALA == 2 ~ "no",
+                               TRUE ~ NA_character_))
+
+# Any respiratory symptom
+df <- data4 %>% 
+  select(dyspnea,fatigue,desaturation,resp_disc)
+
+soma <- function(x){
+  if (sum(is.na(x))==4)
+    return(NA_character_)
+  else
+    return(sum(!is.na(x) & x=="yes")) 
+}
+data4$qt_sintomas_resp_aux <- apply(df,1,soma)
+
+data4 <-  data4 %>%
+  mutate(resp_symp = case_when(qt_sintomas_resp_aux >=1 ~ "yes",
+                                  qt_sintomas_resp_aux ==0 ~ "no",
+                                  TRUE ~ NA_character_))
+# Any symptom
+df <- data4 %>% 
+  select(dyspnea,fatigue,desaturation,resp_disc,
+         fever,cough,sore_throat,diarrhea,vomit,abd_pain,olfac_loss,loss_taste)
+soma <- function(x){
+  if (sum(is.na(x))==12)
+    return(NA_character_)
+  else
+    return(sum(!is.na(x) & x=="yes")) 
+}
+data4$qt_sintomas_aux <- apply(df,1,soma)
+
+data4 <-  data4 %>%
+  mutate(symptom = case_when(qt_sintomas_aux >= 1 ~ "yes",
+                              qt_sintomas_aux == 0 ~ "no",
+                              TRUE ~ NA_character_))
+```
+
+## Non-maternal women
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "women")
+```
+
+### Fever
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, fever, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Cough
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, cough, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Sore throat
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, sore_throat, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Dyspnea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, dyspnea, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Respiratory discomfort
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, resp_disc, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Desaturation
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, desaturation, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Diarrhea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, diarrhea, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Vomit
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, vomit, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Abdominal pain
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, abd_pain, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Fatigue
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, fatigue, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Olfactory loss
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, olfac_loss, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Loss of taste
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, loss_taste, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Any respiratory symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, resp_symp, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Any symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, symptom, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+## Men
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "men")
+```
+
+### Fever
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, fever, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Cough
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, cough, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Sore throat
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, sore_throat, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Dyspnea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, dyspnea, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Respiratory discomfort
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, resp_disc, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Desaturation
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, desaturation, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Diarrhea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, diarrhea, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Vomit
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, vomit, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Abdominal pain
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, abd_pain, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Fatigue
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, fatigue, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Olfactory loss
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, olfac_loss, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Loss of taste
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, loss_taste, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Any respiratory symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, resp_symp, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Any symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, symptom, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+## Maternal
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "maternal")
+```
+
+### Fever
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, fever, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Cough
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, cough, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Sore throat
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, sore_throat, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Dyspnea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, dyspnea, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Respiratory discomfort
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, resp_disc, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Desaturation
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, desaturation, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Diarrhea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, diarrhea, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+###  Vomit
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, vomit, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Abdominal pain
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, abd_pain, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Fatigue
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, fatigue, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Olfactory loss
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, olfac_loss, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Loss of taste
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, loss_taste, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Any respiratory symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, resp_symp, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Any symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, symptom, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+## Breslow-Day test for symptoms
+
+### Fever
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "fever")
+```
+
+### Cough
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "cough")
+```
+
+
+### Sore throat
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "sore_throat")
+```
+
+###  Dyspnea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "dyspnea")
+```
+
+###  Respiratory discomfort
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "resp_disc")
+```
+
+### Desaturation
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "desaturation")
+```
+
+### Diarrhea
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "diarrhea")
+```
+
+###  Vomit
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "vomit")
+```
+
+### Abdominal pain
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "abd_pain")
+```
+
+### Fatigue
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "fatigue")
+```
+
+### Olfactory loss
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "olfac_loss")
+```
+
+### Loss of taste
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "loss_taste")
+```
+
+
+### Any respiratory symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "resp_symp")
+```
+
+### Any symptom
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "symptom")
+```
+
+# Outcome
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+# ICU
+data4 <- data4 %>%
+  mutate(icu = case_when(UTI == 1 ~ "yes",
+                         UTI == 2 ~ "no",
+                         TRUE ~ NA_character_))
+
+# Intubation
+data4 <- data4 %>% 
+  mutate(intubation = case_when(SUPORT_VEN == 1 ~ "yes",
+                               SUPORT_VEN == 2 | SUPORT_VEN == 3 ~ "no",
+                               TRUE ~ NA_character_))
+```
+
+## Non-maternal women
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "women")
+```
+
+### ICU
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, icu, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Intubation
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, intubation, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Death
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, death, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+## Men
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "men")
+```
+
+### ICU
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, icu, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Intubation
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, intubation, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Death
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, death, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+## Maternal
+
+```{r, echo=TRUE, eval= TRUE, message=FALSE, warning =FALSE, error=FALSE}
+data4_aux <- data4 %>% 
+  filter(group == "maternal")
+```
+
+### ICU
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, icu, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+
+### Intubation
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, intubation, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+### Death
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+with(data4_aux, ctable(period, death, prop = "r", useNA = "no", chisq = TRUE, OR=TRUE))
+```
+
+## Breslow-Day test for outcomes
+
+### ICU
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "icu")
+```
+
+### Intubation
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "intubation")
+```
+
+### Death
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+teste_breslowday(data4, "death")
+```
+
+# Forest plot
+
+## For symptoms
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+sints <- c("resp_symp","symptom","dyspnea","fatigue","desaturation","resp_disc","fever","cough","sore_throat","diarrhea","vomit","abd_pain","olfac_loss","loss_taste")
+
+or_symptoms <- or_forest(data4, var = "resp_symp")
+for (i in 2:length(sints)){
+ b <- or_forest(data4, var = sints[i])
+ or_symptoms <- rbind(or_symptoms, b)
+}
+
+or_symptoms <- cbind(index = 1: dim(or_symptoms)[1], or_symptoms)
+
+## Forest plot for symptoms
+xname <- expression(paste("OR"))
+p <- ggplot(data=or_symptoms, aes(y=index, x=or, xmin=li, xmax=ls))+ 
+  geom_point()+ 
+  geom_errorbarh(height=.1)+
+  scale_y_continuous(name = "", breaks=1:42, labels = or_symptoms$group, trans="reverse")+ 
+  geom_vline(xintercept=1, color="black", linetype="dashed", alpha=.5)+ 
+  facet_grid(var~.,  scales= "free", space="free") +
+  theme(strip.text.y = element_text(angle = 0)) + 
+  labs(title="Symptoms", x ="OR")
+
+ggsave(p, file="OR_symptoms.pdf", width = 10, height=8, dpi=300)
+
+ggsave(p, file="OR_symptoms.png", width = 10, height=8, dpi=300)
+
+p
+
+```
+
+## For outcomes
+
+```{r, echo=TRUE,message=FALSE,warning =FALSE,error=FALSE}
+desf <- c("icu", "intubation", "death")
+
+or_outcomes <- or_forest(data4, var = "icu")
+for (i in 2:length(desf)){
+ b <- or_forest(data4, var = desf[i])
+ or_outcomes <- rbind(or_outcomes, b)
+}
+
+or_outcomes <- cbind(index = 1: dim(or_outcomes)[1], or_outcomes)
+
+## Forest plot for symptoms
+xname <- expression(paste("OR"))
+p <- ggplot(data=or_outcomes, aes(y=index, x=or, xmin=li, xmax=ls))+ 
+  geom_point()+ 
+  geom_errorbarh(height=.1)+
+  scale_y_continuous(name = "", breaks=1:9, labels = or_outcomes$group, trans="reverse")+ 
+  geom_vline(xintercept=1, color="black", linetype="dashed", alpha=.5)+ 
+  facet_grid(var~.,  scales= "free", space="free")+
+  theme(strip.text.y = element_text(angle = 0)) +
+  labs(title= "Outcomes", x ="OR")
+
+ggsave(p, file="OR_outcomes.pdf", width = 10, height=8, dpi=300)
+
+ggsave(p, file="OR_outcomes.png", width = 10, height=8, dpi=300)
+
+p
+
+```
